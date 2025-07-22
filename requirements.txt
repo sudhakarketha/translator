@@ -1,0 +1,6 @@
+SpeechRecognition
+PyAudio 
+deep-translator
+streamlit 
+moviepy 
+streamlit-audio-recorder 

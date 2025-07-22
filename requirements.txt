@@ -1,5 +1,4 @@
 SpeechRecognition
-PyAudio 
 deep-translator
 streamlit 
 moviepy 

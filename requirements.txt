@@ -4,4 +4,4 @@ streamlit
 moviepy
 imageio
 imageio-ffmpeg
-numpy 
+numpy

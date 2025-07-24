@@ -3,11 +3,11 @@ import speech_recognition as sr
 from deep_translator import GoogleTranslator
 import tempfile
 import math
-from moviepy.editor import VideoFileClip
 import os
 import json
 import urllib.parse
-# from streamlit_audio_recorder import audio_recorder  # Mic recording not available for Python 3.13
+from streamlit_webrtc import webrtc_streamer, AudioProcessorBase, WebRtcMode
+import av
 
 HISTORY_FILE = "history.json"
 
@@ -38,7 +38,7 @@ if 'history' not in st.session_state:
 # Sidebar with instructions and history
 st.sidebar.title("How to Use")
 st.sidebar.markdown("""
-1. Upload an audio/video file (mic recording is not available for Python 3.13).
+1. Upload an audio file or record from your microphone (using streamlit-webrtc).
 2. Select the language for translation.
 3. Wait for transcription and translation.
 4. Download the results if needed.
@@ -128,12 +128,12 @@ if st.session_state['history']:
 
 st.title("🎤 Audio/Video Translator")
 st.markdown("""
-Upload an audio or video file, transcribe it to text, and translate it to your chosen language. Supports long files and multiple languages, including Telugu!
+Upload an audio file, or record from your microphone (using streamlit-webrtc), transcribe it to text, and translate it to your chosen language. Supports long files and multiple languages, including Telugu!
 
-**Note:** Microphone recording is not available for Python 3.13. Please use the file upload feature. For direct mic recording, use Python 3.10 or 3.11.
+**Note:** Microphone recording uses streamlit-webrtc. You can use the file upload or mic recording feature.
 """)
 
-# input_mode = st.radio("Select input method:", ("Upload file", "Record from mic"))
+input_mode = st.radio("Select input method:", ("Upload file", "Record from mic"))
 
 languages = {
     'French': 'fr',
@@ -152,34 +152,87 @@ languages = {
 }
 target_lang = st.selectbox("Translate to:", list(languages.keys()), index=0)
 
+uploaded_file = None
+recorded_audio = None
+tmp_file_path = None
+
 def extract_audio_from_video(video_path, audio_path):
-    clip = VideoFileClip(video_path)
-    clip.audio.write_audiofile(audio_path, codec='pcm_s16le')
-    clip.close()
+    try:
+        from moviepy.editor import VideoFileClip
+        clip = VideoFileClip(video_path)
+        clip.audio.write_audiofile(audio_path, codec='pcm_s16le')
+        clip.close()
+        return True
+    except ImportError:
+        st.error("moviepy is required for video file support. Please install it with 'pip install moviepy'.")
+        return False
+    except Exception as e:
+        st.error(f"moviepy or one of its dependencies failed: {e}")
+        return False
 
-# uploaded_file = None
-# recorded_audio = None
-
-# if input_mode == "Upload file":
-uploaded_file = st.file_uploader("Choose an audio or video file", type=["wav", "flac", "mp3", "m4a", "mp4", "avi", "mov"])
-# elif input_mode == "Record from mic":
-#     recorded_audio = audio_recorder(text="Click to record", pause_threshold=2.0, sample_rate=44100)
-
-if uploaded_file is not None:
+def get_uploaded_audio_path(uploaded_file):
     file_ext = os.path.splitext(uploaded_file.name)[1].lower()
     is_video = file_ext in [".mp4", ".avi", ".mov"]
     with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp_file:
         tmp_file.write(uploaded_file.read())
         tmp_file_path = tmp_file.name
-
     if is_video:
-        # Extract audio from video
         audio_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
         audio_temp.close()
-        extract_audio_from_video(tmp_file_path, audio_temp.name)
-        audio_path = audio_temp.name
+        if not extract_audio_from_video(tmp_file_path, audio_temp.name):
+            return None, None
+        return audio_temp.name, tmp_file_path
     else:
+        return tmp_file_path, tmp_file_path
+
+if input_mode == "Upload file":
+    uploaded_file = st.file_uploader("Choose an audio or video file", type=["wav", "flac", "mp3", "m4a", "mp4", "avi", "mov"])
+elif input_mode == "Record from mic":
+    class AudioProcessor(AudioProcessorBase):
+        def __init__(self):
+            self.audio_frames = []
+        def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
+            self.audio_frames.append(frame)
+            return frame
+    webrtc_ctx = webrtc_streamer(
+        key="audio",
+        mode=WebRtcMode.SENDRECV,
+        audio_receiver_size=1024,
+        audio_processor_factory=AudioProcessor,
+    )
+    if webrtc_ctx and webrtc_ctx.state.playing and hasattr(webrtc_ctx, "audio_processor") and webrtc_ctx.audio_processor:
+        if st.button("Save Recording"):
+            import numpy as np
+            import wave
+            audio_frames = webrtc_ctx.audio_processor.audio_frames
+            if audio_frames:
+                samples = np.concatenate([frame.to_ndarray() for frame in audio_frames])
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
+                    with wave.open(tmp_file, 'wb') as wf:
+                        wf.setnchannels(1)
+                        wf.setsampwidth(2)
+                        wf.setframerate(44100)
+                        wf.writeframes(samples.tobytes())
+                    recorded_audio = tmp_file.read()
+                    tmp_file_path = tmp_file.name
+                st.success("Recording saved!")
+
+if uploaded_file is not None or recorded_audio is not None:
+    audio_path = None
+    cleanup_files = []
+    if uploaded_file is not None:
+        audio_path, tmp_file_path = get_uploaded_audio_path(uploaded_file)
+        if audio_path is None:
+            st.stop()
+        cleanup_files.append(tmp_file_path)
+        if audio_path != tmp_file_path:
+            cleanup_files.append(audio_path)
+    elif recorded_audio is not None:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
+            tmp_file.write(recorded_audio)
+            tmp_file_path = tmp_file.name
         audio_path = tmp_file_path
+        cleanup_files.append(tmp_file_path)
 
     if audio_path is not None:
         recognizer = sr.Recognizer()
@@ -216,7 +269,7 @@ if uploaded_file is not None:
                     st.download_button(f"Download Translation ({target_lang})", translated_text, file_name=f"translation_{languages[target_lang]}.txt")
                 # Add to history and save to file
                 st.session_state['history'].append({
-                    'filename': uploaded_file.name,
+                    'filename': uploaded_file.name if uploaded_file else 'mic_recording.wav',
                     'language': target_lang,
                     'transcription': text,
                     'translation': translated_text
@@ -233,9 +286,8 @@ if uploaded_file is not None:
                 st.error(f"An error occurred during translation: {e}")
 
         # Clean up temp files
-        try:
-            os.remove(tmp_file_path)
-            if is_video:
-                os.remove(audio_path)
-        except Exception:
-            pass 
+        for f in cleanup_files:
+            try:
+                os.remove(f)
+            except Exception:
+                pass 

@@ -1,7 +1,9 @@
 SpeechRecognition
 deep-translator
 streamlit
-moviepy
 imageio
 imageio-ffmpeg
 numpy
+streamlit-webrtc
+av
+moviepy

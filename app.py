@@ -11,6 +11,8 @@ import av
 import soundfile as sf
 import numpy as np
 import sounddevice as sd
+from audiorecorder import audiorecorder
+import io
 
 HISTORY_FILE = "history.json"
 
@@ -191,19 +193,18 @@ def get_uploaded_audio_path(uploaded_file):
 if input_mode == "Upload file":
     uploaded_file = st.file_uploader("Choose an audio or video file", type=["wav", "flac", "mp3", "m4a", "mp4", "avi", "mov"])
 elif input_mode == "Record from mic":
-    st.header("Record from mic (audio only, robust)")
-    duration = st.slider("Recording duration (seconds)", 1, 30, 5)
-    fs = 44100  # Sample rate
-    if st.button("Start Recording"):
-        st.info("Recording... Please speak into your microphone.")
-        audio = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype='int16')
-        sd.wait()
-        st.success("Recording finished!")
-        # Save to a temporary WAV file
+    st.header("Record from mic (browser-based, works on Streamlit Cloud)")
+    audio = audiorecorder("Click to record", "Click to stop recording")
+    if len(audio) > 0:
+        # Export AudioSegment to WAV bytes
+        wav_io = io.BytesIO()
+        audio.export(wav_io, format="wav")
+        wav_bytes = wav_io.getvalue()
+        # Save the WAV bytes to a temporary file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
-            sf.write(tmp_file, audio, fs)
+            tmp_file.write(wav_bytes)
             st.session_state['recorded_audio_path'] = tmp_file.name
-        st.audio(tmp_file.name, format="audio/wav")
+        st.audio(wav_bytes, format="audio/wav")
         st.success("Recording saved and ready for transcription!")
 
 # When processing, use st.session_state['recorded_audio_path'] as the audio file for transcription if present

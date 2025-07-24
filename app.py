@@ -11,7 +11,7 @@ import av
 import soundfile as sf
 import numpy as np
 
-from audiorecorder import audiorecorder
+# Remove audiorecorder and mic recording imports and logic
 import io
 
 HISTORY_FILE = "history.json"
@@ -193,22 +193,10 @@ def get_uploaded_audio_path(uploaded_file):
 if input_mode == "Upload file":
     uploaded_file = st.file_uploader("Choose an audio or video file", type=["wav", "flac", "mp3", "m4a", "mp4", "avi", "mov"])
 elif input_mode == "Record from mic":
-    st.header("Record from mic (browser-based, works on Streamlit Cloud)")
-    audio = audiorecorder("Click to record", "Click to stop recording")
-    if len(audio) > 0:
-        # Export AudioSegment to WAV bytes
-        wav_io = io.BytesIO()
-        audio.export(wav_io, format="wav")
-        wav_bytes = wav_io.getvalue()
-        # Save the WAV bytes to a temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
-            tmp_file.write(wav_bytes)
-            st.session_state['recorded_audio_path'] = tmp_file.name
-        st.audio(wav_bytes, format="audio/wav")
-        st.success("Recording saved and ready for transcription!")
+    st.warning("Microphone recording is not supported in this deployment. Please record audio on your device and upload the file.")
 
 # When processing, use st.session_state['recorded_audio_path'] as the audio file for transcription if present
-if uploaded_file is not None or recorded_audio is not None or 'recorded_audio_path' in st.session_state:
+if uploaded_file is not None or 'recorded_audio_path' in st.session_state:
     audio_path = None
     cleanup_files = []
     if uploaded_file is not None:
@@ -218,12 +206,6 @@ if uploaded_file is not None or recorded_audio is not None or 'recorded_audio_pa
         cleanup_files.append(tmp_file_path)
         if audio_path != tmp_file_path:
             cleanup_files.append(audio_path)
-    elif recorded_audio is not None:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
-            tmp_file.write(recorded_audio)
-            tmp_file_path = tmp_file.name
-        audio_path = tmp_file_path
-        cleanup_files.append(tmp_file_path)
     elif 'recorded_audio_path' in st.session_state:
         audio_path = st.session_state['recorded_audio_path']
         cleanup_files.append(audio_path)

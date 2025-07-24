@@ -8,6 +8,9 @@ import json
 import urllib.parse
 from streamlit_webrtc import webrtc_streamer, AudioProcessorBase, WebRtcMode
 import av
+import soundfile as sf
+import numpy as np
+import sounddevice as sd
 
 HISTORY_FILE = "history.json"
 
@@ -188,36 +191,23 @@ def get_uploaded_audio_path(uploaded_file):
 if input_mode == "Upload file":
     uploaded_file = st.file_uploader("Choose an audio or video file", type=["wav", "flac", "mp3", "m4a", "mp4", "avi", "mov"])
 elif input_mode == "Record from mic":
-    class AudioProcessor(AudioProcessorBase):
-        def __init__(self):
-            self.audio_frames = []
-        def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
-            self.audio_frames.append(frame)
-            return frame
-    webrtc_ctx = webrtc_streamer(
-        key="audio",
-        mode=WebRtcMode.SENDRECV,
-        audio_receiver_size=1024,
-        audio_processor_factory=AudioProcessor,
-    )
-    if webrtc_ctx and webrtc_ctx.state.playing and hasattr(webrtc_ctx, "audio_processor") and webrtc_ctx.audio_processor:
-        if st.button("Save Recording"):
-            import numpy as np
-            import wave
-            audio_frames = webrtc_ctx.audio_processor.audio_frames
-            if audio_frames:
-                samples = np.concatenate([frame.to_ndarray() for frame in audio_frames])
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
-                    with wave.open(tmp_file, 'wb') as wf:
-                        wf.setnchannels(1)
-                        wf.setsampwidth(2)
-                        wf.setframerate(44100)
-                        wf.writeframes(samples.tobytes())
-                    recorded_audio = tmp_file.read()
-                    tmp_file_path = tmp_file.name
-                st.success("Recording saved!")
+    st.header("Record from mic (audio only, robust)")
+    duration = st.slider("Recording duration (seconds)", 1, 30, 5)
+    fs = 44100  # Sample rate
+    if st.button("Start Recording"):
+        st.info("Recording... Please speak into your microphone.")
+        audio = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype='int16')
+        sd.wait()
+        st.success("Recording finished!")
+        # Save to a temporary WAV file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
+            sf.write(tmp_file, audio, fs)
+            st.session_state['recorded_audio_path'] = tmp_file.name
+        st.audio(tmp_file.name, format="audio/wav")
+        st.success("Recording saved and ready for transcription!")
 
-if uploaded_file is not None or recorded_audio is not None:
+# When processing, use st.session_state['recorded_audio_path'] as the audio file for transcription if present
+if uploaded_file is not None or recorded_audio is not None or 'recorded_audio_path' in st.session_state:
     audio_path = None
     cleanup_files = []
     if uploaded_file is not None:
@@ -233,6 +223,9 @@ if uploaded_file is not None or recorded_audio is not None:
             tmp_file_path = tmp_file.name
         audio_path = tmp_file_path
         cleanup_files.append(tmp_file_path)
+    elif 'recorded_audio_path' in st.session_state:
+        audio_path = st.session_state['recorded_audio_path']
+        cleanup_files.append(audio_path)
 
     if audio_path is not None:
         recognizer = sr.Recognizer()

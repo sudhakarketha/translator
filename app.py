@@ -10,7 +10,7 @@ from streamlit_webrtc import webrtc_streamer, AudioProcessorBase, WebRtcMode
 import av
 import soundfile as sf
 import numpy as np
-import sounddevice as sd
+# import sounddevice as sd
 from audiorecorder import audiorecorder
 import io
 
@@ -270,12 +270,7 @@ if uploaded_file is not None or recorded_audio is not None or 'recorded_audio_pa
                 })
                 with open(HISTORY_FILE, "w", encoding="utf-8") as f:
                     json.dump(st.session_state['history'], f, ensure_ascii=False, indent=2)
-                # Add delete icon for this result in the main area
-                if st.button("🗑️ Delete this result", key="delete_main_result"):
-                    st.session_state['history'].pop()
-                    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-                        json.dump(st.session_state['history'], f, ensure_ascii=False, indent=2)
-                    st.rerun()
+                # Remove the delete icon for this result in the main area
             except Exception as e:
                 st.error(f"An error occurred during translation: {e}")
 

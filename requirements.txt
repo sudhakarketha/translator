@@ -10,3 +10,4 @@ moviepy
 sounddevice
 soundfile
 streamlit-audiorecorder
+gTTS

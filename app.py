@@ -13,6 +13,7 @@ import numpy as np
 
 # Remove audiorecorder and mic recording imports and logic
 import io
+from gtts import gTTS
 
 HISTORY_FILE = "history.json"
 
@@ -138,7 +139,7 @@ Upload an audio file, or record from your microphone (using streamlit-webrtc), t
 **Note:** Microphone recording uses streamlit-webrtc. You can use the file upload or mic recording feature.
 """)
 
-input_mode = st.radio("Select input method:", ("Upload file", "Record from mic"))
+input_mode = st.radio("Select input method:", ("Upload file", "Record from mic", "Type text"))
 
 languages = {
     'French': 'fr',
@@ -194,6 +195,16 @@ if input_mode == "Upload file":
     uploaded_file = st.file_uploader("Choose an audio or video file", type=["wav", "flac", "mp3", "m4a", "mp4", "avi", "mov"])
 elif input_mode == "Record from mic":
     st.warning("Microphone recording is not supported in this deployment. Please record audio on your device and upload the file.")
+elif input_mode == "Type text":
+    typed_text = st.text_area("Enter text to convert to speech:")
+    if st.button("🔊 Listen to Typed Text", key="tts_typed_text"):
+        if typed_text.strip():
+            tts = gTTS(typed_text)
+            tts_fp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+            tts.save(tts_fp.name)
+            st.audio(tts_fp.name, format="audio/mp3")
+        else:
+            st.warning("Please enter some text to convert to speech.")
 
 # When processing, use st.session_state['recorded_audio_path'] as the audio file for transcription if present
 if uploaded_file is not None or 'recorded_audio_path' in st.session_state:
@@ -236,25 +247,37 @@ if uploaded_file is not None or 'recorded_audio_path' in st.session_state:
             with st.expander("Transcription", expanded=True):
                 st.write(text)
                 st.download_button("Download Transcription", text, file_name="transcription.txt")
+                if st.button("🔊 Listen to Transcription", key="tts_transcription"):
+                    tts = gTTS(text)
+                    tts_fp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+                    tts.save(tts_fp.name)
+                    st.audio(tts_fp.name, format="audio/mp3")
         with col2:
-            st.info(f"Translating to {target_lang}...")
-            try:
-                translated_text = GoogleTranslator(source='auto', target=languages[target_lang]).translate(text)
-                with st.expander(f"Translation ({target_lang})", expanded=True):
-                    st.write(translated_text)
-                    st.download_button(f"Download Translation ({target_lang})", translated_text, file_name=f"translation_{languages[target_lang]}.txt")
+            if target_lang.lower() == 'en' or target_lang.lower() == 'english':
+                st.info("Translation is disabled because the target language is the same as the transcription language (English). Please select a different language to enable translation.")
+            else:
+                st.info(f"Translating to {target_lang}...")
+                try:
+                    translation = GoogleTranslator(source='auto', target=target_lang).translate(text)
+                except Exception as e:
+                    st.error(f"An error occurred during translation: {e}")
+                    translation = ""
+                st.write(translation)
+                st.download_button(f"Download Translation ({target_lang})", translation, file_name=f"translation_{target_lang}.txt")
+                if st.button("🔊 Listen to Translation", key="tts_translation"):
+                    tts = gTTS(translation, lang=target_lang)
+                    tts_fp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+                    tts.save(tts_fp.name)
+                    st.audio(tts_fp.name, format="audio/mp3")
                 # Add to history and save to file
                 st.session_state['history'].append({
                     'filename': uploaded_file.name if uploaded_file else 'mic_recording.wav',
                     'language': target_lang,
                     'transcription': text,
-                    'translation': translated_text
+                    'translation': translation
                 })
                 with open(HISTORY_FILE, "w", encoding="utf-8") as f:
                     json.dump(st.session_state['history'], f, ensure_ascii=False, indent=2)
-                # Remove the delete icon for this result in the main area
-            except Exception as e:
-                st.error(f"An error occurred during translation: {e}")
 
         # Clean up temp files
         for f in cleanup_files:
